@@ -4,7 +4,7 @@ from ultralytics import YOLO
 def capturar_poses():
     model = YOLO('yolov8n-pose.pt')
 
-    cap = cv2.VideoCapture(1)
+    cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
         print("No se pudo abrir la cámara.")

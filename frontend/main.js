@@ -10,7 +10,6 @@ let scene, camera, renderer;
 let skeleton = null;
 let socket = null;
 
-
 function init() {
   /* ESCENA */
   scene = new THREE.Scene();
@@ -22,7 +21,9 @@ function init() {
     0.1,
     100
   );
-  camera.position.set(0, 1.5, 3);
+  camera.position.set(0, 10, 20);
+  camera.lookAt(0, 10, 0);
+
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -39,6 +40,8 @@ function init() {
 
   loader.load("./assets/low-poly_test_dummy.glb", (gltf) => {
     const model = gltf.scene;
+    model.scale.set(2, 2, 2);
+    model.position.set(0, 0, 0);
     scene.add(model);
 
     model.traverse((obj) => {

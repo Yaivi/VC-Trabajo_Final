@@ -1,5 +1,4 @@
 import * as THREE from "./libs/three.module.js";
-
 import { GLTFLoader } from "./libs/GLTFLoader.js";
 
 /* ---------------------------------------------------------------- */
@@ -24,7 +23,6 @@ function init() {
   camera.position.set(0, 10, 20);
   camera.lookAt(0, 10, 0);
 
-
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
@@ -38,7 +36,7 @@ function init() {
 
   const loader = new GLTFLoader();
 
-  loader.load("./assets/low-poly_test_dummy.glb", (gltf) => {
+  loader.load("./assets/Rigged_Character.glb", (gltf) => {
     const model = gltf.scene;
     model.scale.set(2, 2, 2);
     model.position.set(0, 0, 0);
@@ -61,6 +59,7 @@ function init() {
   };
 
   socket.onmessage = (event) => {
+    console.log("Keypoints enviados");
     const data = JSON.parse(event.data);
     if (data.type === "pose" && skeleton) {
       updateSkeleton(data.keypoints);
@@ -76,22 +75,41 @@ function init() {
 /* MAPEO YOLO → HUESOS */
 /* ---------------------------------------------------------------- */
 
+// Mapeo de los puntos clave a los huesos del modelo
 const boneMap = {
-  leftUpperArm: [5, 7],
-  leftLowerArm: [7, 9],
-  rightUpperArm: [6, 8],
-  rightLowerArm: [8, 10],
-  leftUpperLeg: [11, 13],
-  leftLowerLeg: [13, 15],
-  rightUpperLeg: [12, 14],
-  rightLowerLeg: [14, 16],
+  // Cabeza y cuello
+  mixamorigHead: [0, 1],    // Cabeza -> cuello (puntos clave de la cabeza y el cuello)
+  mixamorigNeck: [1, 2],    // Cuello -> hombro
+
+  // Tronco
+  mixamorigSpine2: [2, 3],  // Espina -> torso superior
+  mixamorigSpine: [3, 4],   // Torso superior -> torso inferior
+  mixamorigHips: [4, 5],    // Caderas -> zona pélvica
+  
+  // Brazos (derecho e izquierdo)
+  mixamorigRightShoulder: [6, 8],  // Hombro derecho -> codo
+  mixamorigRightArm: [8, 10],      // Codo derecho -> muñeca
+  mixamorigLeftShoulder: [11, 13], // Hombro izquierdo -> codo
+  mixamorigLeftArm: [13, 15],      // Codo izquierdo -> muñeca
+
+  // Piernas
+  mixamorigRightUpLeg: [16, 18], // Muslo derecho -> rodilla
+  mixamorigRightLeg: [18, 20],   // Rodilla derecha -> tobillo
+  mixamorigLeftUpLeg: [21, 23],  // Muslo izquierdo -> rodilla
+  mixamorigLeftLeg: [23, 25],    // Rodilla izquierda -> tobillo
+
+  // Manos y dedos (ajustado para los dedos)
+  mixamorigRightHand: [26, 28],  // Mano derecha -> muñeca derecha
+  mixamorigLeftHand: [29, 31],   // Mano izquierda -> muñeca izquierda
 };
+
 
 /* ---------------------------------------------------------------- */
 /* ACTUALIZAR ESQUELETO */
 /* ---------------------------------------------------------------- */
 
 function updateSkeleton(kpts) {
+  console.log("Actualizando hueso");
   for (const boneName in boneMap) {
     if (!skeleton) return;
 
@@ -103,15 +121,15 @@ function updateSkeleton(kpts) {
     const p2 = kpts[b];
     if (!p1 || !p2) continue;
 
+    // Convertir coordenadas normalizadas si es necesario
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
     const angle = Math.atan2(dy, dx);
 
-    bone.rotation.z = THREE.MathUtils.lerp(
-      bone.rotation.z,
-      -angle,
-      0.35
-    );
+    // Ajuste de rotación del hueso (puedes ajustar la tasa de suavizado)
+    bone.rotation.z = THREE.MathUtils.lerp(bone.rotation.z, -angle, 0.35);
+
+    console.log(`Actualizando hueso ${boneName}: rotación Z = ${bone.rotation.z}`);
   }
 }
 

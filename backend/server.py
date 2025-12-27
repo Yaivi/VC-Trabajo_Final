@@ -1,6 +1,6 @@
-# server.py
 import asyncio
 import websockets
+import json
 
 connected_clients = set()
 
@@ -10,20 +10,40 @@ async def handler(websocket, path):
     print("Cliente conectado")
 
     try:
+        # Recibir mensajes de clientes (como el backend)
         async for message in websocket:
-            # El servidor no procesa mensajes de clientes
-            pass
-    except websockets.exceptions.ConnectionClosed:
-        pass
+            print(f"Mensaje recibido del cliente: {message}") 
+            try:
+                data = json.loads(message)
+                
+                if "keypoints" in data:
+                    print(f"Recibidos keypoints: {data['keypoints']}")
+                else:
+                    print("No se recibieron keypoints.")
+
+                # Reenviar los datos a todos los clientes conectados
+                await send_to_clients(message)
+                print("Mensaje reenviado a todos los clientes")
+            except json.JSONDecodeError as e:
+                print(f"Error al decodificar el mensaje JSON: {e}")
+
+    except websockets.exceptions.ConnectionClosed as e:
+        print(f"Conexión cerrada: {e}")
     finally:
-        # Se elimina cuando se desconecta
+        # Se elimina cuando el cliente se desconecta
         connected_clients.remove(websocket)
         print("Cliente desconectado")
 
 async def send_to_clients(message: str):
     """Envía datos a todos los clientes conectados."""
     if connected_clients:
-        await asyncio.wait([ws.send(message) for ws in connected_clients])
+        for ws in connected_clients:
+            try:
+                await ws.send(message)
+            except websockets.exceptions.ConnectionClosed:
+                # El cliente ha cerrado la conexión, lo eliminamos de la lista
+                connected_clients.remove(ws)
+                print(f"Cliente desconectado y eliminado: {ws.remote_address}")
 
 async def start_server():
     print("Servidor WebSocket iniciado en ws://localhost:8000")

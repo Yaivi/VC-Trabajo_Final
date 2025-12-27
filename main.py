@@ -17,10 +17,6 @@ def start_http_server():
         print("Frontend en http://localhost:3000")
         httpd.serve_forever()
 
-
-# ----------------------------
-# Función para hacer ping al puerto WS
-# ----------------------------
 async def wait_for_websocket(host="localhost", port=8000, timeout=10):
 
     start_time = asyncio.get_event_loop().time()

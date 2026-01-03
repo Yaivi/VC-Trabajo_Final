@@ -1,12 +1,19 @@
 import cv2
 import asyncio
+
 import websockets
 import json
 from ultralytics import YOLO
 
-async def send_keypoints(websocket, keypoints):
-    message = json.dumps({"keypoints": keypoints})
-    await websocket.send(message)
+async def send_keypoints(ws, data, uri="ws://localhost:8000"):
+    try:
+        await ws.send(json.dumps(data))
+    except (websockets.ConnectionClosedError, websockets.ConnectionClosedOK):
+        print("⚠ Conexión WS cerrada, reconectando...")
+        ws = await websockets.connect(uri)
+        await ws.send(json.dumps(data))
+    return ws
+
 
 async def start_websocket():
     #Inicia la conexión WebSocket y la mantiene abierta.
@@ -14,6 +21,17 @@ async def start_websocket():
     websocket = await websockets.connect(uri)
     print("Conexión WebSocket establecida.")
     return websocket
+
+async def wait_for_ws(host="localhost", port=8000, timeout=10):
+    start = asyncio.get_event_loop().time()
+    while True:
+        try:
+            with websockets.create_connection((host, port), timeout=1):
+                return
+        except OSError:
+            if asyncio.get_event_loop().time() - start > timeout:
+                raise TimeoutError("No se pudo conectar al WS")
+            await asyncio.sleep(0.1)
 
 async def capturar_poses():
     model = YOLO('yolov8n-pose.pt')
@@ -62,7 +80,6 @@ async def capturar_poses():
             # Enviar los keypoints al servidor WebSocket de forma asíncrona
             await send_keypoints(websocket, keypoints_list)
 
-        cv2.imshow("YOLOv8 Pose Estimation", annotated_frame)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break

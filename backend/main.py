@@ -1,92 +1,81 @@
 import cv2
 import asyncio
-
 import websockets
 import json
+import time
 from ultralytics import YOLO
 
-async def send_keypoints(ws, data, uri="ws://localhost:8000"):
-    try:
-        await ws.send(json.dumps(data))
-    except (websockets.ConnectionClosedError, websockets.ConnectionClosedOK):
-        print("⚠ Conexión WS cerrada, reconectando...")
-        ws = await websockets.connect(uri)
-        await ws.send(json.dumps(data))
-    return ws
-
-
-async def start_websocket():
-    #Inicia la conexión WebSocket y la mantiene abierta.
-    uri = "ws://localhost:8000"
-    websocket = await websockets.connect(uri)
-    print("Conexión WebSocket establecida.")
-    return websocket
-
-async def wait_for_ws(host="localhost", port=8000, timeout=10):
-    start = asyncio.get_event_loop().time()
-    while True:
-        try:
-            with websockets.create_connection((host, port), timeout=1):
-                return
-        except OSError:
-            if asyncio.get_event_loop().time() - start > timeout:
-                raise TimeoutError("No se pudo conectar al WS")
-            await asyncio.sleep(0.1)
-
 async def capturar_poses():
+    print("🚀 Cargando modelo YOLO (Nano)...")
     model = YOLO('yolov8n-pose.pt')
 
-    cap = cv2.VideoCapture(0)
-
+    # Configurar cámara
+    cap = cv2.VideoCapture(1)
     if not cap.isOpened():
-        print("No se pudo abrir la cámara.")
+        cap = cv2.VideoCapture(0)
+    
+    if not cap.isOpened():
+        print("Error: No hay cámara.")
         return
 
-    print("Presiona 'q' para salir.")
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 30)
 
-    websocket = await start_websocket()  # Mantener la conexión WebSocket abierta
+    print("Cámara iniciada en modo oculto (High Performance).")
+    print("Conectando al servidor...")
 
+    uri = "ws://localhost:8000"
+    
+    prev_time = 0
+    
     while True:
-        success, frame = cap.read()
-        if not success:
+        try:
+            async with websockets.connect(uri) as websocket:
+                print("Conectado. Enviando datos a toda velocidad...")
+                
+                while True:
+                    start_time = time.time()
+                    
+                    success, frame = cap.read()
+                    if not success:
+                        print("Fallo cámara")
+                        break
+
+                    results = model(frame, conf=0.5, imgsz=320, verbose=False)
+
+                    if results[0].keypoints is not None:
+                        kpts = results[0].keypoints.xy.cpu().numpy()
+                        
+                        keypoints_list = []
+                        for idx, persona in enumerate(kpts):
+                            if len(persona) > 0:
+                                keypoints_list.append({
+                                    "persona_idx": idx,
+                                    "keypoints": persona.tolist()
+                                })
+
+                        if keypoints_list:
+                            data = json.dumps({"type": "pose", "keypoints": keypoints_list})
+                            await websocket.send(data)
+
+                    curr_time = time.time()
+                    fps = 1 / (curr_time - prev_time) if prev_time > 0 else 0
+                    prev_time = curr_time
+
+                    await asyncio.sleep(0.001)
+
+        except (OSError, websockets.exceptions.ConnectionClosed):
+            print("Conexión perdida o servidor apagado. Reintentando en 2s...")
+            await asyncio.sleep(2)
+        except KeyboardInterrupt:
+            print("Saliendo...")
             break
-
-        results = model(frame, conf=0.5)
-
-        annotated_frame = results[0].plot()
-
-        if results[0].keypoints is not None:
-            keypoints = results[0].keypoints.xy.cpu().numpy()
-
-            # Preparar los keypoints para enviar
-            keypoints_list = []
-
-            for persona_idx, persona_kpts in enumerate(keypoints):
-                if len(persona_kpts) > 0:
-                    keypoints_list.append({
-                        "persona_idx": persona_idx,
-                        "keypoints": persona_kpts.tolist()
-                    })
-
-            # Crear el mensaje que será enviado a través del WebSocket
-            data = {
-                "type": "pose",           # Establecemos el tipo como "pose"
-                "keypoints": keypoints_list  # Agregamos los keypoints de todas las personas
-            }
-
-            # Enviar el mensaje
-            await websocket.send(json.dumps(data))
-
-            # Enviar los keypoints al servidor WebSocket de forma asíncrona
-            await send_keypoints(websocket, keypoints_list)
-
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        except Exception as e:
+            print(f"Error: {e}")
             break
 
     cap.release()
-    cv2.destroyAllWindows()
-    await websocket.close()  # Cerrar la conexión WebSocket al final
 
 if __name__ == "__main__":
     asyncio.run(capturar_poses())

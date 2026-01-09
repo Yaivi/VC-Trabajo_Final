@@ -2,24 +2,27 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /* ---------------------------------------------------------------- */
-/* 🔧 ZONA DE REPARACIÓN INSTANTÁNEA */
+/* 🔧 CONFIGURACIÓN FINAL */
 /* ---------------------------------------------------------------- */
 
-// CAMBIA ESTO SI EL BRAZO DERECHO SIGUE MAL:
-
-// Opción A: Sumar 180 grados al brazo derecho (Corrige el fallo de "brazo invertido")
-const FIX_RIGHT_ARM_OFFSET = true; 
-
-// Opción B: Si al subir el brazo, el muñeco lo baja, cambia esto a -1
-const RIGHT_ARM_DIRECTION = 1; 
-const LEFT_ARM_DIRECTION = -1; // El izquierdo te iba bien invertido
-
-/* ---------------------------------------------------------------- */
-/* CONFIGURACIÓN STANDARD */
-/* ---------------------------------------------------------------- */
 const VIDEO_WIDTH = 640;
 const VIDEO_HEIGHT = 480;
-const FRUSTUM_SIZE = 20; 
+const FRUSTUM_SIZE = 20.0; // Aumentado para ver más espacio (Zoom Out)
+
+// EJES Y DIRECCIONES
+const BONE_AXIS = 'x'; 
+
+// Si con 1 sube cuando tú subes, déjalo en 1.
+// Si sube cuando tú bajas, ponlo en -1.
+const RIGHT_ARM_DIR = -1; 
+const LEFT_ARM_DIR = -1;
+
+const OFFSETS = {
+    RightArm: 0, 
+    LeftArm: 0,
+    RightUpLeg: Math.PI / 2, 
+    LeftUpLeg: Math.PI / 2
+};
 
 const JOINT_NAMES = {
     RightArm: "RightArm", RightForeArm: "RightForeArm",
@@ -32,38 +35,46 @@ let scene, camera, renderer, skeleton, socket, modelMesh;
 
 function init() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x2a2a2a);
+  scene.background = new THREE.Color(0x202020); // Gris muy oscuro
 
+  // CÁMARA ORTOGRÁFICA
   const aspect = window.innerWidth / window.innerHeight;
   camera = new THREE.OrthographicCamera(
     FRUSTUM_SIZE * aspect / -2, FRUSTUM_SIZE * aspect / 2,
     FRUSTUM_SIZE / 2, FRUSTUM_SIZE / -2,
     0.1, 100
   );
-  camera.position.set(0, 1.0, 5);
-  camera.lookAt(0, 1.0, 0);
+  
+  // Posición centrada y alejada
+  camera.position.set(0, 0, 10);
+  camera.lookAt(0, 0, 0);
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  const light = new THREE.DirectionalLight(0xffffff, 1.5);
-  light.position.set(0, 0, 10);
+  // LUCES
+  const light = new THREE.DirectionalLight(0xffffff, 2.0);
+  light.position.set(0, 2, 10);
   scene.add(light);
   scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+
 
   const loader = new GLTFLoader();
   loader.load("./assets/Rigged_Character.glb", (gltf) => {
     modelMesh = gltf.scene;
     scene.add(modelMesh);
-    modelMesh.position.set(0, -1, 0);
+    
+    // Centramos el modelo manualmente
+    // Ajusta la 'y' (-1.0) si el modelo está muy alto o bajo respecto al cubo rojo
+    modelMesh.position.set(0, -1.0, 0);
+    modelMesh.scale.set(1, 1, 1);
     
     modelMesh.traverse((obj) => {
       if (obj.isSkinnedMesh && !skeleton) skeleton = obj.skeleton;
     });
-    console.log("✅ Modelo Cargado - Corrección de Brazo Derecho Activada");
 
-  }, undefined, (e) => console.error(e));
+  }, undefined, (e) => console.error("Error cargando modelo:", e));
 
   connectWebSocket();
   window.addEventListener("resize", onWindowResize);
@@ -86,13 +97,13 @@ function connectWebSocket() {
 }
 
 /* ---------------------------------------------------------------- */
-/* LÓGICA DE MOVIMIENTO CON CORRECCIÓN DE 180 GRADOS */
+/* LÓGICA DE MOVIMIENTO */
 /* ---------------------------------------------------------------- */
 
 function updateSkeleton(kpts) {
     const P = {
-        ls: toPoint(kpts[5]), le: toPoint(kpts[7]), lw: toPoint(kpts[9]),
-        rs: toPoint(kpts[6]), re: toPoint(kpts[8]), rw: toPoint(kpts[10]),
+        ls: toPoint(kpts[5]), le: toPoint(kpts[7]), lw: toPoint(kpts[9]),   
+        rs: toPoint(kpts[6]), re: toPoint(kpts[8]), rw: toPoint(kpts[10]),  
         rh: toPoint(kpts[12]), rk: toPoint(kpts[14]),
         lh: toPoint(kpts[11]), lk: toPoint(kpts[13]),
         nose: toPoint(kpts[0])
@@ -103,42 +114,47 @@ function updateSkeleton(kpts) {
         if (P[key] && (P[key].x !== 0 || P[key].y !== 0)) N[key] = normalizePoint(P[key]);
     }
 
-    // --- BRAZO DERECHO (EL PROBLEMÁTICO) ---
-    if (N.rs && N.re) {
-        const angle = Math.atan2(N.re.y - N.rs.y, N.re.x - N.rs.x);
-        
-        // AQUÍ ESTÁ EL TRUCO: Si activamos FIX, sumamos PI (180 grados)
-        let offset = FIX_RIGHT_ARM_OFFSET ? Math.PI : 0;
-        
-        applyRotation(JOINT_NAMES.RightArm, angle, offset, RIGHT_ARM_DIRECTION);
-        
-        if (N.rw) {
-             const angleFore = Math.atan2(N.rw.y - N.re.y, N.rw.x - N.re.x);
-             // El antebrazo también necesita heredar esa corrección
-             applyRotation(JOINT_NAMES.RightForeArm, angleFore - angle, 0, RIGHT_ARM_DIRECTION); 
-        }
-    }
-
-    // --- BRAZO IZQUIERDO (EL QUE IBA BIEN) ---
+    // --- BRAZO IZQUIERDO (Base) ---
     if (N.ls && N.le) {
         const angle = Math.atan2(N.le.y - N.ls.y, N.le.x - N.ls.x);
-        // El izquierdo generalmente no necesita el offset de PI si el modelo es estándar
-        applyRotation(JOINT_NAMES.LeftArm, angle, 0, LEFT_ARM_DIRECTION);
+        applyRotation(JOINT_NAMES.LeftArm, angle, OFFSETS.LeftArm, LEFT_ARM_DIR);
         
         if (N.lw) {
              const angleFore = Math.atan2(N.lw.y - N.le.y, N.lw.x - N.le.x);
-             applyRotation(JOINT_NAMES.LeftForeArm, angleFore - angle, 0, LEFT_ARM_DIRECTION);
+             applyRotation(JOINT_NAMES.LeftForeArm, angleFore - angle, 0, LEFT_ARM_DIR);
+        }
+    }
+
+    // --- BRAZO DERECHO (Espejo + Dirección Corregida) ---
+    if (N.rs && N.re) {
+        let dy = N.re.y - N.rs.y;
+        let dx = N.re.x - N.rs.x;
+
+        // Espejamos X (-dx) para usar la matemática del lado izquierdo (que funciona bien)
+        const angleMirrored = Math.atan2(dy, -dx);
+        
+        // Aplicamos con la dirección corregida (1)
+        applyRotation(JOINT_NAMES.RightArm, angleMirrored, OFFSETS.RightArm, RIGHT_ARM_DIR);
+        
+        if (N.rw) {
+             let dyFore = N.rw.y - N.re.y;
+             let dxFore = N.rw.x - N.re.x;
+             const angleForeMirrored = Math.atan2(dyFore, -dxFore);
+             
+             applyRotation(JOINT_NAMES.RightForeArm, angleForeMirrored - angleMirrored, 0, RIGHT_ARM_DIR); 
         }
     }
 
     // --- PIERNAS ---
     if (N.rh && N.rk) {
-        const angle = Math.atan2(N.rk.y - N.rh.y, N.rk.x - N.rh.x);
-        applyRotation(JOINT_NAMES.RightUpLeg, angle, Math.PI/2, 1);
+        let dy = N.rk.y - N.rh.y;
+        let dx = N.rk.x - N.rh.x;
+        const angle = Math.atan2(dy, -dx); // Espejamos también la pierna derecha
+        applyRotation(JOINT_NAMES.RightUpLeg, angle, OFFSETS.RightUpLeg, 1);
     }
     if (N.lh && N.lk) {
         const angle = Math.atan2(N.lk.y - N.lh.y, N.lk.x - N.lh.x);
-        applyRotation(JOINT_NAMES.LeftUpLeg, angle, Math.PI/2, -1);
+        applyRotation(JOINT_NAMES.LeftUpLeg, angle, OFFSETS.LeftUpLeg, -1);
     }
 }
 
@@ -146,14 +162,13 @@ function applyRotation(boneName, angle, offset, directionFactor) {
     const bone = getBone(boneName);
     if (!bone) return;
 
-    // Fórmula Maestra
     let finalRot = (angle * directionFactor) + offset;
     const speed = 0.5;
 
-    // Reseteo
+    // Bloqueamos otros ejes para forzar 2D plano
     bone.rotation.set(0, 0, 0);
 
-    // EJE X es el que elegimos como ganador
+    // EJE X (Según tus pruebas era el bueno)
     bone.rotation.x = THREE.MathUtils.lerp(bone.rotation.x, finalRot, speed);
 }
 

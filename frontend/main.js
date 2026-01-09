@@ -2,80 +2,123 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /* ---------------------------------------------------------------- */
-/* 🔧 CONFIGURACIÓN FINAL */
+/* 🔧 CONFIGURACIÓN COMPLETA */
 /* ---------------------------------------------------------------- */
 
-const VIDEO_WIDTH = 640;
-const VIDEO_HEIGHT = 480;
-const FRUSTUM_SIZE = 20.0;
+let IS_MIRROR_MODE = true; 
 
-// EJES Y DIRECCIONES
-const BONE_AXIS = 'x'; 
-
+// DIRECCIONES
 const RIGHT_ARM_DIR = -1; 
 const LEFT_ARM_DIR = -1;
 
-// CONSTANTES PARA PIERNAS
-const LEG_SENSITIVITY = 0.5;
-const MIN_LEG_ANGLE = -Math.PI * 0.4;
-const MAX_LEG_ANGLE = Math.PI * 0.4;
+const VIDEO_WIDTH = 640;
+const VIDEO_HEIGHT = 480;
 
+// Ajustamos offsets - PRUEBA con 0 o Math.PI/2 según necesites
 const OFFSETS = {
     RightArm: 0, 
     LeftArm: 0,
-    RightUpLeg: 0, 
-    LeftUpLeg: 0,
-    RightLeg: 0,
-    LeftLeg: 0
+    RightUpLeg: Math.PI / 2,  // Cambia a 0 si las piernas están torcidas
+    LeftUpLeg: Math.PI / 2    // Cambia a 0 si las piernas están torcidas
 };
 
 const JOINT_NAMES = {
     RightArm: "RightArm", RightForeArm: "RightForeArm",
     LeftArm: "LeftArm", LeftForeArm: "LeftForeArm",
     RightUpLeg: "RightUpLeg", LeftUpLeg: "LeftUpLeg",
-    RightLeg: "RightLeg", LeftLeg: "LeftLeg",
     Head: "Head"
 };
 
 let scene, camera, renderer, skeleton, socket, modelMesh;
 
+const infoDiv = document.createElement('div');
+infoDiv.style.position = 'absolute';
+infoDiv.style.top = '20px';
+infoDiv.style.left = '20px';
+infoDiv.style.color = '#00ff00';
+infoDiv.style.fontFamily = 'monospace';
+infoDiv.style.fontSize = '16px';
+infoDiv.style.fontWeight = 'bold';
+infoDiv.style.textShadow = '1px 1px 0 #000';
+infoDiv.style.pointerEvents = 'none';
+document.body.appendChild(infoDiv);
+
+function updateInfoText() {
+    infoDiv.innerText = `[M] MODO: ${IS_MIRROR_MODE ? "VIDEO" : "ESPEJO"}`;
+    infoDiv.style.color = IS_MIRROR_MODE ? "#00ff00" : "#ffaa00";
+}
+
 function init() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x202020);
+  scene.background = new THREE.Color(0xa0a0a0);
+  scene.fog = new THREE.Fog(0xa0a0a0, 20, 60);
 
-  const aspect = window.innerWidth / window.innerHeight;
-  camera = new THREE.OrthographicCamera(
-    FRUSTUM_SIZE * aspect / -2, FRUSTUM_SIZE * aspect / 2,
-    FRUSTUM_SIZE / 2, FRUSTUM_SIZE / -2,
-    0.1, 100
-  );
+  // 1. CÁMARA DE PERSPECTIVA (ALEJADA)
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
   
-  camera.position.set(0, 0, 10);
-  camera.lookAt(0, 0, 0);
+  // CAMBIO CLAVE: Z = 14 (Antes era 5 o 6). Esto aleja mucho la cámara.
+  // Y = 1.0 (Altura de la cintura para centrarlo verticalmente)
+  camera.position.set(0, 1.0, 14); 
+  
+  camera.lookAt(0, 0.0, 0); // Mirar al centro del cuerpo
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true; 
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.appendChild(renderer.domElement);
 
-  const light = new THREE.DirectionalLight(0xffffff, 2.0);
-  light.position.set(0, 2, 10);
-  scene.add(light);
-  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+  // 2. ILUMINACIÓN
+  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+  hemiLight.position.set(0, 20, 0);
+  scene.add(hemiLight);
 
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+  dirLight.position.set(3, 10, 10);
+  dirLight.castShadow = true; 
+  scene.add(dirLight);
+
+  // 3. SUELO
+  const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(100, 100),
+      new THREE.MeshPhongMaterial({ color: 0x999999, depthWrite: false })
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.receiveShadow = true; 
+  mesh.position.y = -1.0; // Bajamos el suelo para que coincida con los pies
+  scene.add(mesh);
+
+  // Cargar Modelo
   const loader = new GLTFLoader();
   loader.load("./assets/Rigged_Character.glb", (gltf) => {
     modelMesh = gltf.scene;
     scene.add(modelMesh);
     
-    modelMesh.position.set(0, -1.0, 0);
-    modelMesh.scale.set(1, 1, 1);
+    // POSICIÓN: Bajamos el modelo un poco para que los pies toquen el suelo (-1)
+    modelMesh.position.set(0, -1.0, 0); 
+    
+    // ESCALA: Si aún se ve grande, baja estos números (ej: 0.8, 0.8, 0.8)
+    modelMesh.scale.set(0.4, 0.4, 0.4); 
     
     modelMesh.traverse((obj) => {
-      if (obj.isSkinnedMesh && !skeleton) skeleton = obj.skeleton;
+      if (obj.isSkinnedMesh) {
+          skeleton = obj.skeleton;
+          obj.castShadow = true;    
+          obj.receiveShadow = true; 
+      }
     });
+    console.log("✅ Modelo cargado y alejado");
 
-  }, undefined, (e) => console.error("Error cargando modelo:", e));
+  }, undefined, (e) => console.error(e));
 
+  window.addEventListener('keydown', (e) => {
+      if (e.key === 'm' || e.key === 'M') {
+          IS_MIRROR_MODE = !IS_MIRROR_MODE;
+          updateInfoText();
+      }
+  });
+
+  updateInfoText();
   connectWebSocket();
   window.addEventListener("resize", onWindowResize);
   animate();
@@ -97,215 +140,112 @@ function connectWebSocket() {
 }
 
 /* ---------------------------------------------------------------- */
-/* LÓGICA DE MOVIMIENTO CORREGIDA - VERSIÓN FUNCIONAL */
+/* LÓGICA DE MOVIMIENTO MEJORADA */
 /* ---------------------------------------------------------------- */
 
 function updateSkeleton(kpts) {
-    // DEBUG: Ver qué puntos estamos recibiendo realmente
-    console.log("=== PUNTOS YOLOv8 ===");
-    console.log("5-left_shoulder:", kpts[5]);
-    console.log("6-right_shoulder:", kpts[6]);
-    console.log("11-left_hip (cintura):", kpts[11]);
-    console.log("12-right_hip (cintura):", kpts[12]);
-    console.log("13-left_knee:", kpts[13]);
-    console.log("14-right_knee:", kpts[14]);
-
-    // Obtener puntos reales de YOLOv8
     const P = {
-        // Brazos (funcionan bien)
         ls: toPoint(kpts[5]), le: toPoint(kpts[7]), lw: toPoint(kpts[9]),   
-        rs: toPoint(kpts[6]), re: toPoint(kpts[8]), rw: toPoint(kpts[10]),
-        
-        // Puntos de pierna REALES (los que YOLO detecta)
-        left_side: toPoint(kpts[11]),  // ¡NO es cadera! Es lado de cintura
-        right_side: toPoint(kpts[12]), // ¡NO es cadera! Es lado de cintura
-        lk: toPoint(kpts[13]), la: toPoint(kpts[15]), // Rodilla y tobillo izquierdo
-        rk: toPoint(kpts[14]), ra: toPoint(kpts[16]), // Rodilla y tobillo derecho
-        
+        rs: toPoint(kpts[6]), re: toPoint(kpts[8]), rw: toPoint(kpts[10]),  
+        rh: toPoint(kpts[12]), rk: toPoint(kpts[14]),
+        lh: toPoint(kpts[11]), lk: toPoint(kpts[13]),
         nose: toPoint(kpts[0])
     };
 
-    // Normalizar todos los puntos
     const N = {};
     for (let key in P) {
-        if (P[key] && (P[key].x !== 0 || P[key].y !== 0)) {
-            N[key] = normalizePoint(P[key]);
-        }
+        if (P[key] && (P[key].x !== 0 || P[key].y !== 0)) N[key] = normalizePoint(P[key]);
     }
 
-    // --- CALCULAR CADERAS REALES ---
-    // Método 1: Si tenemos hombro y rodilla, calcular cadera aproximada
-    // Método 2: Si no, usar el punto lateral de la cintura ajustado
+    // Preparar estructuras para modo espejo
+    let inLeft = { s: N.ls, e: N.le, w: N.lw }; 
+    let inRight = { s: N.rs, e: N.re, w: N.rw }; 
+    let inLegLeft = { h: N.lh, k: N.lk };
+    let inLegRight = { h: N.rh, k: N.rk };
+
+    let targetLeft, targetRight, targetLegLeft, targetLegRight;
+
+    if (IS_MIRROR_MODE) {
+        // Modo VIDEO: usar puntos originales
+        targetLeft = inLeft;
+        targetRight = inRight;
+        targetLegLeft = inLegLeft;
+        targetLegRight = inLegRight;
+    } else {
+        // Modo ESPEJO: intercambiar lados
+        targetLeft = flipStructure(inRight); 
+        targetRight = flipStructure(inLeft); 
+        targetLegLeft = flipStructure(inLegRight);
+        targetLegRight = flipStructure(inLegLeft);
+    }
     
-    // Cadera izquierda
-    if (N.ls && N.lk) {
-        // La cadera está entre el hombro y la rodilla, más cerca del hombro
-        N.lh = {
-            x: N.ls.x * 0.6 + N.lk.x * 0.4,
-            y: N.ls.y * 0.7 + N.lk.y * 0.3
-        };
-    } else if (N.left_side) {
-        // Usar el punto lateral ajustado hacia abajo
-        N.lh = {
-            x: N.left_side.x,
-            y: N.left_side.y + 0.15  // Bajar un poco
-        };
-    } else {
-        // Posición por defecto
-        N.lh = { x: -0.2, y: 0 };
-    }
-
-    // Cadera derecha
-    if (N.rs && N.rk) {
-        N.rh = {
-            x: N.rs.x * 0.6 + N.rk.x * 0.4,
-            y: N.rs.y * 0.7 + N.rk.y * 0.3
-        };
-    } else if (N.right_side) {
-        N.rh = {
-            x: N.right_side.x,
-            y: N.right_side.y + 0.15
-        };
-    } else {
-        N.rh = { x: 0.2, y: 0 };
-    }
-
-    console.log("Cadera izq calculada:", N.lh);
-    console.log("Cadera der calculada:", N.rh);
-    console.log("Rodilla izq:", N.lk);
-    console.log("Rodilla der:", N.rk);
-
-    // --- BRAZOS (sin cambios) ---
-    if (N.ls && N.le) {
-        const angle = Math.atan2(N.le.y - N.ls.y, N.le.x - N.ls.x);
+    // --- BRAZO IZQUIERDO ---
+    if (targetLeft.s && targetLeft.e) {
+        const angle = Math.atan2(targetLeft.e.y - targetLeft.s.y, targetLeft.e.x - targetLeft.s.x);
         applyRotation(JOINT_NAMES.LeftArm, angle, OFFSETS.LeftArm, LEFT_ARM_DIR);
         
-        if (N.lw) {
-             const angleFore = Math.atan2(N.lw.y - N.le.y, N.lw.x - N.le.x);
+        if (targetLeft.w) {
+             const angleFore = Math.atan2(targetLeft.w.y - targetLeft.e.y, targetLeft.w.x - targetLeft.e.x);
              applyRotation(JOINT_NAMES.LeftForeArm, angleFore - angle, 0, LEFT_ARM_DIR);
         }
     }
 
-    if (N.rs && N.re) {
-        let dy = N.re.y - N.rs.y;
-        let dx = N.re.x - N.rs.x;
+    // --- BRAZO DERECHO ---
+    if (targetRight.s && targetRight.e) {
+        let dy = targetRight.e.y - targetRight.s.y;
+        let dx = targetRight.e.x - targetRight.s.x;
+
+        // Espejamos X (-dx) para usar la matemática del lado izquierdo
         const angleMirrored = Math.atan2(dy, -dx);
+        
         applyRotation(JOINT_NAMES.RightArm, angleMirrored, OFFSETS.RightArm, RIGHT_ARM_DIR);
         
-        if (N.rw) {
-             let dyFore = N.rw.y - N.re.y;
-             let dxFore = N.rw.x - N.re.x;
+        if (targetRight.w) {
+             let dyFore = targetRight.w.y - targetRight.e.y;
+             let dxFore = targetRight.w.x - targetRight.e.x;
              const angleForeMirrored = Math.atan2(dyFore, -dxFore);
+             
              applyRotation(JOINT_NAMES.RightForeArm, angleForeMirrored - angleMirrored, 0, RIGHT_ARM_DIR); 
         }
     }
 
-    // --- PIERNA IZQUIERDA - SIMPLIFICADA Y FUNCIONAL ---
-    if (N.lh && N.lk) {
-        const dx = N.lk.x - N.lh.x;
-        const dy = N.lk.y - N.lh.y;
-        
-        console.log("Pierna izq - dx:", dx.toFixed(3), "dy:", dy.toFixed(3));
-        
-        // Cálculo simple del ángulo
-        // En reposo (pierna recta), dx ≈ 0, dy negativo (rodilla abajo de cadera)
-        // Queremos que el ángulo sea 0 cuando la pierna está recta
-        let angle = Math.atan2(-dy, dx); // Invertimos dy para que tenga sentido
-        
-        // Limitar y suavizar
-        angle = THREE.MathUtils.clamp(angle * LEG_SENSITIVITY, MIN_LEG_ANGLE, MAX_LEG_ANGLE);
-        
-        // Aplicar rotación
-        const bone = getBone(JOINT_NAMES.LeftUpLeg);
-        if (bone) {
-            bone.rotation.x = THREE.MathUtils.lerp(
-                bone.rotation.x,
-                angle,
-                0.2
-            );
-        }
-        
-        // RODILLA (si tenemos tobillo)
-        if (N.la) {
-            const dxKnee = N.la.x - N.lk.x;
-            const dyKnee = N.la.y - N.lk.y;
-            
-            // Ángulo entre muslo y espinilla
-            let kneeAngle = Math.atan2(-dyKnee, dxKnee) * LEG_SENSITIVITY;
-            kneeAngle = Math.max(0, kneeAngle - angle) * 0.3;
-            
-            const kneeBone = getBone(JOINT_NAMES.LeftLeg);
-            if (kneeBone) {
-                kneeBone.rotation.x = THREE.MathUtils.lerp(
-                    kneeBone.rotation.x,
-                    -kneeAngle,
-                    0.2
-                );
-            }
-        }
-    } else {
-        // Si no hay detección, volver a posición neutra
-        const bone = getBone(JOINT_NAMES.LeftUpLeg);
-        if (bone) {
-            bone.rotation.x = THREE.MathUtils.lerp(bone.rotation.x, 0, 0.05);
-        }
-        const kneeBone = getBone(JOINT_NAMES.LeftLeg);
-        if (kneeBone) {
-            kneeBone.rotation.x = THREE.MathUtils.lerp(kneeBone.rotation.x, 0, 0.05);
-        }
+    // --- PIERNA IZQUIERDA (LÓGICA SIMPLIFICADA DEL SEGUNDO CÓDIGO) ---
+    if (targetLegLeft.h && targetLegLeft.k) {
+        const dx = targetLegLeft.k.x - targetLegLeft.h.x;
+        const dy = targetLegLeft.k.y - targetLegLeft.h.y;
+
+        // Ángulo respecto a la vertical
+        let angle = Math.atan2(dx, dy);
+
+        // Clamp humano (adelante / atrás)
+        angle = THREE.MathUtils.clamp(angle, -0.8, 0.8);
+
+        // Dead zone (anti-temblor)
+        if (Math.abs(angle) < 0.05) angle = 0;
+
+        applyRotation(JOINT_NAMES.LeftUpLeg, angle, OFFSETS.LeftUpLeg, -1);
     }
 
-    // --- PIERNA DERECHA - SIMPLIFICADA Y FUNCIONAL ---
-    if (N.rh && N.rk) {
-        const dx = N.rk.x - N.rh.x;
-        const dy = N.rk.y - N.rh.y;
-        
-        console.log("Pierna der - dx:", dx.toFixed(3), "dy:", dy.toFixed(3));
-        
-        // Para pierna derecha, espejamos en X
-        let angle = Math.atan2(-dy, -dx); // Espejado en X
-        
-        // Limitar y suavizar
-        angle = THREE.MathUtils.clamp(angle * LEG_SENSITIVITY, MIN_LEG_ANGLE, MAX_LEG_ANGLE);
-        
-        // Aplicar rotación
-        const bone = getBone(JOINT_NAMES.RightUpLeg);
-        if (bone) {
-            bone.rotation.x = THREE.MathUtils.lerp(
-                bone.rotation.x,
-                angle,
-                0.2
-            );
-        }
-        
-        // RODILLA
-        if (N.ra) {
-            const dxKnee = N.ra.x - N.rk.x;
-            const dyKnee = N.ra.y - N.rk.y;
-            
-            let kneeAngle = Math.atan2(-dyKnee, -dxKnee) * LEG_SENSITIVITY;
-            kneeAngle = Math.max(0, kneeAngle - angle) * 0.3;
-            
-            const kneeBone = getBone(JOINT_NAMES.RightLeg);
-            if (kneeBone) {
-                kneeBone.rotation.x = THREE.MathUtils.lerp(
-                    kneeBone.rotation.x,
-                    -kneeAngle,
-                    0.2
-                );
-            }
-        }
-    } else {
-        // Si no hay detección, volver a posición neutra
-        const bone = getBone(JOINT_NAMES.RightUpLeg);
-        if (bone) {
-            bone.rotation.x = THREE.MathUtils.lerp(bone.rotation.x, 0, 0.05);
-        }
-        const kneeBone = getBone(JOINT_NAMES.RightLeg);
-        if (kneeBone) {
-            kneeBone.rotation.x = THREE.MathUtils.lerp(kneeBone.rotation.x, 0, 0.05);
-        }
+    // --- PIERNA DERECHA (LÓGICA SIMPLIFICADA DEL SEGUNDO CÓDIGO) ---
+    if (targetLegRight.h && targetLegRight.k) {
+        const dx = targetLegRight.k.x - targetLegRight.h.x;
+        const dy = targetLegRight.k.y - targetLegRight.h.y;
+
+        let angle = Math.atan2(dx, dy);
+
+        angle = THREE.MathUtils.clamp(angle, -0.8, 0.8);
+        if (Math.abs(angle) < 0.05) angle = 0;
+
+        applyRotation(JOINT_NAMES.RightUpLeg, angle, OFFSETS.RightUpLeg, 1);
     }
+}
+
+function flipStructure(obj) {
+    let newObj = {};
+    for (let key in obj) {
+        if (obj[key]) newObj[key] = { x: -obj[key].x, y: obj[key].y };
+    }
+    return newObj;
 }
 
 function applyRotation(boneName, angle, offset, directionFactor) {
@@ -315,35 +255,27 @@ function applyRotation(boneName, angle, offset, directionFactor) {
     let finalRot = (angle * directionFactor) + offset;
     const speed = 0.5;
 
+    // Limpiar rotaciones anteriores y aplicar solo en eje X
+    bone.rotation.set(0, 0, 0);
     bone.rotation.x = THREE.MathUtils.lerp(bone.rotation.x, finalRot, speed);
-}
-
-// NORMALIZACIÓN SIMPLE Y FUNCIONAL
-function normalizePoint(p) { 
-    if (!p || p.x === undefined || p.y === undefined) return null;
-    
-    // Normalización centrada
-    // En la imagen: (0,0) = esquina superior izquierda
-    // En Three.js: (0,0) = centro, Y positivo = arriba
-    const x = ((p.x / VIDEO_WIDTH) - 0.5) * 2;   // -1 a 1, centrado
-    const y = -((p.y / VIDEO_HEIGHT) - 0.5) * 2; // -1 a 1, centrado, invertido Y
-    
-    return { 
-        x: x * 1.5,  // Escalar un poco
-        y: y * 1.5
-    }; 
 }
 
 function toPoint(raw) { 
     if (!raw) return null;
+    return (Array.isArray(raw)) ? { x: raw[0], y: raw[1] } : raw; 
+}
+
+function normalizePoint(p) { 
+    if (!p || p.x === undefined || p.y === undefined) return null;
     
-    if (Array.isArray(raw)) {
-        // YOLOv8 devuelve [x, y, confidence]
-        return { x: raw[0], y: raw[1] };
-    } else if (raw.x !== undefined && raw.y !== undefined) {
-        return raw;
-    }
-    return null;
+    // Normalización centrada para mejor precisión
+    const x = ((p.x / VIDEO_WIDTH) - 0.5) * 2;
+    const y = -((p.y / VIDEO_HEIGHT) - 0.5) * 2;
+    
+    return { 
+        x: x * 1.2,  // Escala un poco
+        y: y * 1.2
+    }; 
 }
 
 function getBone(baseName) {
@@ -354,11 +286,7 @@ function getBone(baseName) {
 }
 
 function onWindowResize() {
-    const aspect = window.innerWidth / window.innerHeight;
-    camera.left = -FRUSTUM_SIZE * aspect / 2;
-    camera.right = FRUSTUM_SIZE * aspect / 2;
-    camera.top = FRUSTUM_SIZE / 2;
-    camera.bottom = -FRUSTUM_SIZE / 2;
+    camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 }

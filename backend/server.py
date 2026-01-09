@@ -38,7 +38,7 @@ async def send_to_clients(message: str, sender_ws):
                     connected_clients.discard(ws)
 
 async def start_server():
-    print("🚀 Servidor WebSocket escuchando en ws://localhost:8000")
+    print("Servidor WebSocket escuchando en ws://localhost:8000")
     async with websockets.serve(handler, "localhost", 8000, ping_interval=None):
         await asyncio.Future()
 

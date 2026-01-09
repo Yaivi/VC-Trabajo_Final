@@ -18,8 +18,8 @@ const VIDEO_HEIGHT = 480;
 const OFFSETS = {
     RightArm: 0, 
     LeftArm: 0,
-    RightUpLeg: Math.PI / 2,  // Cambia a 0 si las piernas están torcidas
-    LeftUpLeg: Math.PI / 2    // Cambia a 0 si las piernas están torcidas
+    RightUpLeg: 0,  // Cambia a 0 si las piernas están torcidas
+    LeftUpLeg: 0    // Cambia a 0 si las piernas están torcidas
 };
 
 const JOINT_NAMES = {
@@ -144,6 +144,7 @@ function connectWebSocket() {
 /* ---------------------------------------------------------------- */
 
 function updateSkeleton(kpts) {
+    // OBTENER PUNTOS EXACTAMENTE COMO EL SEGUNDO CÓDIGO
     const P = {
         ls: toPoint(kpts[5]), le: toPoint(kpts[7]), lw: toPoint(kpts[9]),   
         rs: toPoint(kpts[6]), re: toPoint(kpts[8]), rw: toPoint(kpts[10]),  
@@ -152,34 +153,32 @@ function updateSkeleton(kpts) {
         nose: toPoint(kpts[0])
     };
 
+    // NORMALIZAR EXACTAMENTE COMO EL SEGUNDO CÓDIGO
     const N = {};
     for (let key in P) {
-        if (P[key] && (P[key].x !== 0 || P[key].y !== 0)) N[key] = normalizePoint(P[key]);
+        if (P[key] && (P[key].x !== 0 || P[key].y !== 0)) {
+            N[key] = normalizePoint(P[key]);
+        }
     }
 
-    // Preparar estructuras para modo espejo
-    let inLeft = { s: N.ls, e: N.le, w: N.lw }; 
-    let inRight = { s: N.rs, e: N.re, w: N.rw }; 
-    let inLegLeft = { h: N.lh, k: N.lk };
-    let inLegRight = { h: N.rh, k: N.rk };
-
-    let targetLeft, targetRight, targetLegLeft, targetLegRight;
-
-    if (IS_MIRROR_MODE) {
-        // Modo VIDEO: usar puntos originales
-        targetLeft = inLeft;
-        targetRight = inRight;
-        targetLegLeft = inLegLeft;
-        targetLegRight = inLegRight;
-    } else {
-        // Modo ESPEJO: intercambiar lados
-        targetLeft = flipStructure(inRight); 
-        targetRight = flipStructure(inLeft); 
-        targetLegLeft = flipStructure(inLegRight);
-        targetLegRight = flipStructure(inLegLeft);
-    }
+    // --- PARA BRAZOS: USAR LÓGICA DE MODO ESPEJO ---
+    let targetLeft, targetRight;
     
-    // --- BRAZO IZQUIERDO ---
+    if (IS_MIRROR_MODE) {
+        // MODO VIDEO: usar puntos originales para brazos
+        targetLeft = { s: N.ls, e: N.le, w: N.lw };
+        targetRight = { s: N.rs, e: N.re, w: N.rw };
+    } else {
+        // MODO ESPEJO: intercambiar lados para brazos
+        targetLeft = { s: {x: -N.rs?.x || 0, y: N.rs?.y || 0}, 
+                      e: {x: -N.re?.x || 0, y: N.re?.y || 0}, 
+                      w: {x: -N.rw?.x || 0, y: N.rw?.y || 0} };
+        targetRight = { s: {x: -N.ls?.x || 0, y: N.ls?.y || 0}, 
+                       e: {x: -N.le?.x || 0, y: N.le?.y || 0}, 
+                       w: {x: -N.lw?.x || 0, y: N.lw?.y || 0} };
+    }
+
+    // --- BRAZOS CON MODO ESPEJO ---
     if (targetLeft.s && targetLeft.e) {
         const angle = Math.atan2(targetLeft.e.y - targetLeft.s.y, targetLeft.e.x - targetLeft.s.x);
         applyRotation(JOINT_NAMES.LeftArm, angle, OFFSETS.LeftArm, LEFT_ARM_DIR);
@@ -190,31 +189,47 @@ function updateSkeleton(kpts) {
         }
     }
 
-    // --- BRAZO DERECHO ---
     if (targetRight.s && targetRight.e) {
         let dy = targetRight.e.y - targetRight.s.y;
         let dx = targetRight.e.x - targetRight.s.x;
 
-        // Espejamos X (-dx) para usar la matemática del lado izquierdo
         const angleMirrored = Math.atan2(dy, -dx);
-        
         applyRotation(JOINT_NAMES.RightArm, angleMirrored, OFFSETS.RightArm, RIGHT_ARM_DIR);
         
         if (targetRight.w) {
              let dyFore = targetRight.w.y - targetRight.e.y;
              let dxFore = targetRight.w.x - targetRight.e.x;
              const angleForeMirrored = Math.atan2(dyFore, -dxFore);
-             
              applyRotation(JOINT_NAMES.RightForeArm, angleForeMirrored - angleMirrored, 0, RIGHT_ARM_DIR); 
         }
     }
 
-    // --- PIERNA IZQUIERDA (LÓGICA SIMPLIFICADA DEL SEGUNDO CÓDIGO) ---
-    if (targetLegLeft.h && targetLegLeft.k) {
-        const dx = targetLegLeft.k.x - targetLegLeft.h.x;
-        const dy = targetLegLeft.k.y - targetLegLeft.h.y;
+    // --- PIERNAS: USAR EXACTAMENTE LA LÓGICA DEL SEGUNDO CÓDIGO SIN MODO ESPEJO ---
+    // El segundo código NO tiene modo espejo para piernas
+    // Si quieres modo espejo para piernas, debemos intercambiar lados
+    
+    let piernaIzqHip, piernaIzqKnee, piernaDerHip, piernaDerKnee;
+    
+    if (IS_MIRROR_MODE) {
+        // MODO VIDEO: puntos originales
+        piernaIzqHip = N.lh;
+        piernaIzqKnee = N.lk;
+        piernaDerHip = N.rh;
+        piernaDerKnee = N.rk;
+    } else {
+        // MODO ESPEJO: intercambiar lados
+        piernaIzqHip = N.rh;
+        piernaIzqKnee = N.rk;
+        piernaDerHip = N.lh;
+        piernaDerKnee = N.lk;
+    }
 
-        // Ángulo respecto a la vertical
+    // ---------- PIERNA IZQUIERDA ----------
+    if (piernaIzqHip && piernaIzqKnee) {
+        const dx = piernaIzqKnee.x - piernaIzqHip.x;
+        const dy = piernaIzqKnee.y - piernaIzqHip.y;
+
+        // Ángulo respecto a la vertical (COPIADO DEL SEGUNDO CÓDIGO)
         let angle = Math.atan2(dx, dy);
 
         // Clamp humano (adelante / atrás)
@@ -226,10 +241,10 @@ function updateSkeleton(kpts) {
         applyRotation(JOINT_NAMES.LeftUpLeg, angle, OFFSETS.LeftUpLeg, -1);
     }
 
-    // --- PIERNA DERECHA (LÓGICA SIMPLIFICADA DEL SEGUNDO CÓDIGO) ---
-    if (targetLegRight.h && targetLegRight.k) {
-        const dx = targetLegRight.k.x - targetLegRight.h.x;
-        const dy = targetLegRight.k.y - targetLegRight.h.y;
+    // ---------- PIERNA DERECHA ----------
+    if (piernaDerHip && piernaDerKnee) {
+        const dx = piernaDerKnee.x - piernaDerHip.x;
+        const dy = piernaDerKnee.y - piernaDerHip.y;
 
         let angle = Math.atan2(dx, dy);
 
@@ -240,14 +255,6 @@ function updateSkeleton(kpts) {
     }
 }
 
-function flipStructure(obj) {
-    let newObj = {};
-    for (let key in obj) {
-        if (obj[key]) newObj[key] = { x: -obj[key].x, y: obj[key].y };
-    }
-    return newObj;
-}
-
 function applyRotation(boneName, angle, offset, directionFactor) {
     const bone = getBone(boneName);
     if (!bone) return;
@@ -255,8 +262,6 @@ function applyRotation(boneName, angle, offset, directionFactor) {
     let finalRot = (angle * directionFactor) + offset;
     const speed = 0.5;
 
-    // Limpiar rotaciones anteriores y aplicar solo en eje X
-    bone.rotation.set(0, 0, 0);
     bone.rotation.x = THREE.MathUtils.lerp(bone.rotation.x, finalRot, speed);
 }
 
@@ -268,13 +273,10 @@ function toPoint(raw) {
 function normalizePoint(p) { 
     if (!p || p.x === undefined || p.y === undefined) return null;
     
-    // Normalización centrada para mejor precisión
-    const x = ((p.x / VIDEO_WIDTH) - 0.5) * 2;
-    const y = -((p.y / VIDEO_HEIGHT) - 0.5) * 2;
-    
+    // NORMALIZACIÓN EXACTA DEL SEGUNDO CÓDIGO
     return { 
-        x: x * 1.2,  // Escala un poco
-        y: y * 1.2
+        x: (p.x / VIDEO_WIDTH) * 2 - 1, 
+        y: -((p.y / VIDEO_HEIGHT) * 2 - 1) 
     }; 
 }
 

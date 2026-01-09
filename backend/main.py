@@ -6,7 +6,7 @@ import time
 from ultralytics import YOLO
 
 async def capturar_poses():
-    print("🚀 Cargando modelo YOLO (Nano)...")
+    print("Cargando modelo YOLO (Nano)...")
     model = YOLO('yolov8n-pose.pt')
 
     # Configurar cámara
@@ -22,7 +22,7 @@ async def capturar_poses():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_FPS, 30)
 
-    print("Cámara iniciada en modo oculto (High Performance).")
+    print("Cámara iniciada.")
     print("Conectando al servidor...")
 
     uri = "ws://localhost:8000"
@@ -32,7 +32,7 @@ async def capturar_poses():
     while True:
         try:
             async with websockets.connect(uri) as websocket:
-                print("Conectado. Enviando datos a toda velocidad...")
+                print("Conectado.")
                 
                 while True:
                     start_time = time.time()

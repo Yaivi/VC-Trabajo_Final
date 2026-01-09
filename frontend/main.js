@@ -2,20 +2,24 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /* ---------------------------------------------------------------- */
-/* 🔧 AJUSTES DE DIRECCIÓN (MODIFICA ESTO SI VAN AL REVÉS) */
+/* 🔧 ZONA DE REPARACIÓN INSTANTÁNEA */
 /* ---------------------------------------------------------------- */
 
-// Si levantas el brazo y el muñeco lo baja, cambia 1 por -1
-const ARM_DIRECTION = 1;    
+// CAMBIA ESTO SI EL BRAZO DERECHO SIGUE MAL:
 
-// Si mueves la pierna adelante y el muñeco la mueve atrás, cambia -1 por 1
-const LEG_DIRECTION = -1;   
+// Opción A: Sumar 180 grados al brazo derecho (Corrige el fallo de "brazo invertido")
+const FIX_RIGHT_ARM_OFFSET = true; 
+
+// Opción B: Si al subir el brazo, el muñeco lo baja, cambia esto a -1
+const RIGHT_ARM_DIRECTION = 1; 
+const LEFT_ARM_DIRECTION = -1; // El izquierdo te iba bien invertido
 
 /* ---------------------------------------------------------------- */
-/* CONFIGURACIÓN */
+/* CONFIGURACIÓN STANDARD */
 /* ---------------------------------------------------------------- */
 const VIDEO_WIDTH = 640;
 const VIDEO_HEIGHT = 480;
+const FRUSTUM_SIZE = 20; 
 
 const JOINT_NAMES = {
     RightArm: "RightArm", RightForeArm: "RightForeArm",
@@ -24,186 +28,137 @@ const JOINT_NAMES = {
     Head: "Head"
 };
 
-let scene, camera, renderer;
-let skeleton = null;
-let socket = null;
-let modelMesh = null;
-
-// Ayudas visuales (Esferas para ver si llegan datos)
-let debugHelpers = {}; 
+let scene, camera, renderer, skeleton, socket, modelMesh;
 
 function init() {
-  // 1. Escena
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x222222);
+  scene.background = new THREE.Color(0x2a2a2a);
 
-  // 2. Cámara
-  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-  camera.position.set(0, 1.2, 5); 
-  camera.lookAt(0, 0.8, 0);
+  const aspect = window.innerWidth / window.innerHeight;
+  camera = new THREE.OrthographicCamera(
+    FRUSTUM_SIZE * aspect / -2, FRUSTUM_SIZE * aspect / 2,
+    FRUSTUM_SIZE / 2, FRUSTUM_SIZE / -2,
+    0.1, 100
+  );
+  camera.position.set(0, 1.0, 5);
+  camera.lookAt(0, 1.0, 0);
 
-  // 3. Luces
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
-  scene.add(ambientLight);
-  const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
-  dirLight.position.set(2, 5, 5);
-  scene.add(dirLight);
+  const light = new THREE.DirectionalLight(0xffffff, 1.5);
+  light.position.set(0, 0, 10);
+  scene.add(light);
+  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-  // 4. Cargar Modelo
   const loader = new GLTFLoader();
   loader.load("./assets/Rigged_Character.glb", (gltf) => {
     modelMesh = gltf.scene;
     scene.add(modelMesh);
-    modelMesh.position.set(0, -1, 0); 
-    modelMesh.scale.set(0.15, 0.15,0.15); 
-
+    modelMesh.position.set(0, -1, 0);
+    
     modelMesh.traverse((obj) => {
       if (obj.isSkinnedMesh && !skeleton) skeleton = obj.skeleton;
     });
-    console.log("✅ Modelo cargado.");
+    console.log("✅ Modelo Cargado - Corrección de Brazo Derecho Activada");
 
   }, undefined, (e) => console.error(e));
-
-  // Crear indicadores visuales (debug)
-  createDebugSphere("LeftHand", -1, 1, 0); // Esfera Izquierda
-  createDebugSphere("RightHand", 1, 1, 0); // Esfera Derecha
 
   connectWebSocket();
   window.addEventListener("resize", onWindowResize);
   animate();
 }
 
-function createDebugSphere(name, x, y, z) {
-    const geo = new THREE.SphereGeometry(0.1);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // Rojo = No detectado
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x, y, z);
-    scene.add(mesh);
-    debugHelpers[name] = mesh;
-}
-
-/* ---------------------------------------------------------------- */
-/* WEBSOCKET */
-/* ---------------------------------------------------------------- */
 function connectWebSocket() {
     socket = new WebSocket("ws://localhost:8000");
-    socket.onopen = () => console.log("✅ WebSocket conectado");
-    
     socket.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
             if (data.type === "pose" && data.keypoints) {
                 let kpts = data.keypoints;
-                if (Array.isArray(kpts) && kpts[0] && kpts[0].keypoints) {
-                    kpts = kpts[0].keypoints;
-                }
-                
-                if (skeleton && kpts.length > 0) {
-                    processPose(kpts);
-                }
+                if (Array.isArray(kpts) && kpts[0] && kpts[0].keypoints) kpts = kpts[0].keypoints;
+                if (skeleton && kpts.length > 0) updateSkeleton(kpts);
             }
-        } catch (e) { console.error(e); }
+        } catch (e) {}
     };
-    
-    socket.onclose = () => setTimeout(connectWebSocket, 3000);
+    socket.onclose = () => setTimeout(connectWebSocket, 2000);
 }
 
 /* ---------------------------------------------------------------- */
-/* LÓGICA SIN RESETEO (FREEZE MODE) */
+/* LÓGICA DE MOVIMIENTO CON CORRECCIÓN DE 180 GRADOS */
 /* ---------------------------------------------------------------- */
-function processPose(kpts) {
-    
-    // Puntos necesarios
+
+function updateSkeleton(kpts) {
     const P = {
-        ls: toPoint(kpts[5]), le: toPoint(kpts[7]), lw: toPoint(kpts[9]),   // Brazo Izq
-        rs: toPoint(kpts[6]), re: toPoint(kpts[8]), rw: toPoint(kpts[10]),  // Brazo Der
-        lh: toPoint(kpts[11]), lk: toPoint(kpts[13]),                       // Pierna Izq
-        rh: toPoint(kpts[12]), rk: toPoint(kpts[14]),                       // Pierna Der
+        ls: toPoint(kpts[5]), le: toPoint(kpts[7]), lw: toPoint(kpts[9]),
+        rs: toPoint(kpts[6]), re: toPoint(kpts[8]), rw: toPoint(kpts[10]),
+        rh: toPoint(kpts[12]), rk: toPoint(kpts[14]),
+        lh: toPoint(kpts[11]), lk: toPoint(kpts[13]),
         nose: toPoint(kpts[0])
     };
 
-    // Normalizar
     const N = {};
     for (let key in P) {
         if (P[key] && (P[key].x !== 0 || P[key].y !== 0)) N[key] = normalizePoint(P[key]);
     }
 
-    // DEBUG: Iluminar esferas si detectamos manos
-    if (N.lw) debugHelpers["LeftHand"].material.color.set(0x00ff00); // Verde si ve mano izq
-    else debugHelpers["LeftHand"].material.color.set(0xff0000);      // Rojo si la pierde
-
-    if (N.rw) debugHelpers["RightHand"].material.color.set(0x00ff00);
-    else debugHelpers["RightHand"].material.color.set(0xff0000);
-
-
-    // --- BRAZO DERECHO ---
-    const bRA = getBone(JOINT_NAMES.RightArm);
-    const bRFA = getBone(JOINT_NAMES.RightForeArm);
-    
-    if (bRA && bRFA && N.rs && N.re && N.rw) {
-        // Hombro
-        const angArm = getAngle(N.rs, N.re);
-        bRA.rotation.z = THREE.MathUtils.lerp(bRA.rotation.z, angArm * ARM_DIRECTION, 0.5);
+    // --- BRAZO DERECHO (EL PROBLEMÁTICO) ---
+    if (N.rs && N.re) {
+        const angle = Math.atan2(N.re.y - N.rs.y, N.re.x - N.rs.x);
         
-        // Codo
-        let angElbow = getAngle(N.re, N.rw) - angArm;
-        while (angElbow <= -Math.PI) angElbow += Math.PI*2;
-        while (angElbow > Math.PI) angElbow -= Math.PI*2;
-        angElbow = THREE.MathUtils.clamp(angElbow, 0, 2.5); // Limitar flexión
+        // AQUÍ ESTÁ EL TRUCO: Si activamos FIX, sumamos PI (180 grados)
+        let offset = FIX_RIGHT_ARM_OFFSET ? Math.PI : 0;
         
-        bRFA.rotation.z = THREE.MathUtils.lerp(bRFA.rotation.z, angElbow, 0.5);
+        applyRotation(JOINT_NAMES.RightArm, angle, offset, RIGHT_ARM_DIRECTION);
         
-        // Limpiar rotaciones basura
-        bRA.rotation.x = 0; bRA.rotation.y = 0;
+        if (N.rw) {
+             const angleFore = Math.atan2(N.rw.y - N.re.y, N.rw.x - N.re.x);
+             // El antebrazo también necesita heredar esa corrección
+             applyRotation(JOINT_NAMES.RightForeArm, angleFore - angle, 0, RIGHT_ARM_DIRECTION); 
+        }
     }
 
-    // --- BRAZO IZQUIERDO ---
-    const bLA = getBone(JOINT_NAMES.LeftArm);
-    const bLFA = getBone(JOINT_NAMES.LeftForeArm);
-    
-    if (bLA && bLFA && N.ls && N.le && N.lw) {
-        const angArm = getAngle(N.ls, N.le);
-        bLA.rotation.z = THREE.MathUtils.lerp(bLA.rotation.z, angArm * ARM_DIRECTION, 0.5);
-
-        let angElbow = getAngle(N.le, N.lw) - angArm;
-        while (angElbow <= -Math.PI) angElbow += Math.PI*2;
-        while (angElbow > Math.PI) angElbow -= Math.PI*2;
-        angElbow = THREE.MathUtils.clamp(angElbow, -2.5, 0);
+    // --- BRAZO IZQUIERDO (EL QUE IBA BIEN) ---
+    if (N.ls && N.le) {
+        const angle = Math.atan2(N.le.y - N.ls.y, N.le.x - N.ls.x);
+        // El izquierdo generalmente no necesita el offset de PI si el modelo es estándar
+        applyRotation(JOINT_NAMES.LeftArm, angle, 0, LEFT_ARM_DIRECTION);
         
-        bLFA.rotation.z = THREE.MathUtils.lerp(bLFA.rotation.z, angElbow, 0.5);
-        
-        bLA.rotation.x = 0; bLA.rotation.y = 0;
+        if (N.lw) {
+             const angleFore = Math.atan2(N.lw.y - N.le.y, N.lw.x - N.le.x);
+             applyRotation(JOINT_NAMES.LeftForeArm, angleFore - angle, 0, LEFT_ARM_DIRECTION);
+        }
     }
 
     // --- PIERNAS ---
-    const bRUL = getBone(JOINT_NAMES.RightUpLeg);
-    if (bRUL && N.rh && N.rk) {
-        let legAngle = getAngle(N.rh, N.rk);
-        // +90 grados offset, multiplicado por dirección
-        let finalAngle = (legAngle + Math.PI/2) * LEG_DIRECTION;
-        bRUL.rotation.x = THREE.MathUtils.lerp(bRUL.rotation.x, finalAngle, 0.5);
-        bRUL.rotation.z = 0;
+    if (N.rh && N.rk) {
+        const angle = Math.atan2(N.rk.y - N.rh.y, N.rk.x - N.rh.x);
+        applyRotation(JOINT_NAMES.RightUpLeg, angle, Math.PI/2, 1);
     }
-
-    const bLUL = getBone(JOINT_NAMES.LeftUpLeg);
-    if (bLUL && N.lh && N.lk) {
-        let legAngle = getAngle(N.lh, N.lk);
-        let finalAngle = (legAngle + Math.PI/2) * LEG_DIRECTION;
-        bLUL.rotation.x = THREE.MathUtils.lerp(bLUL.rotation.x, finalAngle, 0.5);
-        bLUL.rotation.z = 0;
+    if (N.lh && N.lk) {
+        const angle = Math.atan2(N.lk.y - N.lh.y, N.lk.x - N.lh.x);
+        applyRotation(JOINT_NAMES.LeftUpLeg, angle, Math.PI/2, -1);
     }
 }
 
-/* ---------------------------------------------------------------- */
-/* UTILIDADES */
-/* ---------------------------------------------------------------- */
+function applyRotation(boneName, angle, offset, directionFactor) {
+    const bone = getBone(boneName);
+    if (!bone) return;
+
+    // Fórmula Maestra
+    let finalRot = (angle * directionFactor) + offset;
+    const speed = 0.5;
+
+    // Reseteo
+    bone.rotation.set(0, 0, 0);
+
+    // EJE X es el que elegimos como ganador
+    bone.rotation.x = THREE.MathUtils.lerp(bone.rotation.x, finalRot, speed);
+}
+
 function toPoint(raw) { return (Array.isArray(raw)) ? { x: raw[0], y: raw[1] } : raw; }
-function normalizePoint(p) { return { x: (p.x / VIDEO_WIDTH) * 2 - 1, y: -((p.y / VIDEO_HEIGHT) * 2 - 1) }; }
-function getAngle(p1, p2) { return Math.atan2(p2.y - p1.y, p2.x - p1.x); }
+function normalizePoint(p) { return { x: (p.x / VIDEO_WIDTH) * 2 - 1, y: -( (p.y / VIDEO_HEIGHT) * 2 - 1 ) }; }
 
 function getBone(baseName) {
     if (!skeleton) return null;
@@ -213,14 +168,17 @@ function getBone(baseName) {
 }
 
 function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+    const aspect = window.innerWidth / window.innerHeight;
+    camera.left = -FRUSTUM_SIZE * aspect / 2;
+    camera.right = FRUSTUM_SIZE * aspect / 2;
+    camera.top = FRUSTUM_SIZE / 2;
+    camera.bottom = -FRUSTUM_SIZE / 2;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
 function animate() {
   requestAnimationFrame(animate);
-  // NO HAY CHECKTIMEOUTS -> NO SE RESETEA
   renderer.render(scene, camera);
 }
 

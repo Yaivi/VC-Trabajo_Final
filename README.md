@@ -12,7 +12,8 @@ Este proyecto se divide en varios componentes:
 
 Para el backend usamos un script de python para la captura de movimientos junto al modelo de YOLOV8N-POSE enviando los datos a un websocket y usamos otro script de python para manejar la conexión al websocket.
 
-Los datos enviados al websocket desde el YOLO deben superar la confianza de un 0.5, estos se agrupan en una lista de puntos clave, una vez conocidos estos puntos se escribe un JSON y se envia a la ruta del websocket.
+
+Los datos enviados al websocket desde el YOLO deben superar la confianza de un 0.5, estos se agrupan en una lista de puntos clave, una vez conocidos estos puntos se escribe un JSON y se envia a la ruta del websocket. Para mejorar el tiempo de respuesta establecimos, que la resolución de la imagen ya que no necesitamos tanta resolución para detectar los huesos, hacemos que YOLO procese una imagen más pequeña internamente y solo dejamos un sleep mínimo para no bloquear al procesador.
 
 El server.py se encarga de controlar y manejar los errores y conexiones entrantes al websocket.
 

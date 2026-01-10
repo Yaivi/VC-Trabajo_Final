@@ -25,9 +25,16 @@ Hay 2 modos disponibles un modo espejo en el cual refleja lo que estas haciendo 
 
 ![Modo espejo](image.png)
 
-Para ejecutar este proyecto usar los siguiente comandos desde la ruta base:
+## Ejecución del proyecto
 
+Para ejecutar este proyecto se deben usar los siguiente comandos desde la ruta base en 3 terminales diferentes:
+
+Para arrancar el servidor de WebSockets
     python /backend/server.py
+
+Para iniciar la captura de imágenes
     python /backend/main.py
+
+Para habilitar el servidor http que hostea el Three.js
     cd /frontend
     python -m http.server 3000

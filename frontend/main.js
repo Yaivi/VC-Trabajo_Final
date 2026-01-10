@@ -106,7 +106,7 @@ function init() {
           obj.receiveShadow = true; 
       }
     });
-    console.log("✅ Modelo cargado con Profundidad Z");
+    console.log("Modelo cargado con Profundidad Z");
 
   }, undefined, (e) => console.error(e));
 
@@ -158,7 +158,7 @@ function updateSkeleton(kpts) {
         }
     }
 
-    // --- 1. CÁLCULO DE PROFUNDIDAD (NUEVO) ---
+    // --- 1. CÁLCULO DE PROFUNDIDAD ---
     // Usamos la distancia entre hombros (Left Shoulder - Right Shoulder)
     if (N.ls && N.rs && modelMesh) {
         // Calcular ancho actual de hombros
